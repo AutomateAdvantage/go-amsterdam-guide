@@ -4,20 +4,17 @@ import { notFound } from "next/navigation";
 type Props = { params: Promise<{ category: string }> };
 
 export default async function CategoryPage({ params }: Props) {
-  const { category } = await params; // <-- await params
+  const { category } = await params; // await params
   const sb = createAdminSupabaseClient();
-  const slug = category;
 
-  // Find the category
   const { data: cat } = await sb
     .from("categories")
     .select("*")
-    .eq("slug", slug)
+    .eq("slug", category)
     .single();
 
   if (!cat) notFound();
 
-  // Get places in this category
   const { data: places } = await sb
     .from("places")
     .select("id,name,slug,address,price_level,rating,review_count")
