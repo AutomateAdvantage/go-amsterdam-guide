@@ -7,7 +7,7 @@ export default async function PlacePage({ params }: Props) {
   const { slug } = await params; // Next 15: params is a Promise
   const sb = createAdminSupabaseClient();
 
-  // Include raw foreign keys so we always have a fallback
+  // Include raw foreign keys as fallback
   const { data: place } = await sb
     .from("places")
     .select(
@@ -23,14 +23,18 @@ export default async function PlacePage({ params }: Props) {
 
   if (!place) notFound();
 
-  // Handle both array and object shapes for joined relations
-  const categoryLabel = Array.isArray(place.categories)
-    ? place.categories[0]?.label
-    : place.categories?.label;
+  // Safely handle either array or object joins from PostgREST
+  type CatJoin = { label?: string } | { label?: string }[] | null | undefined;
+  type NeighJoin = { name?: string } | { name?: string }[] | null | undefined;
 
-  const neighborhoodName = Array.isArray(place.neighborhoods)
-    ? place.neighborhoods[0]?.name
-    : place.neighborhoods?.name;
+  const catJoin = place.categories as CatJoin;
+  const nJoin = place.neighborhoods as NeighJoin;
+
+  const categoryLabel =
+    Array.isArray(catJoin) ? catJoin[0]?.label : catJoin?.label;
+
+  const neighborhoodName =
+    Array.isArray(nJoin) ? nJoin[0]?.name : nJoin?.name;
 
   const { data: photos } = await sb
     .from("place_photos")
@@ -67,7 +71,7 @@ export default async function PlacePage({ params }: Props) {
 
       {photos?.length ? (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-8">
-          {/* Using <img> is fine; Next warns to consider <Image/> for perf */}
+          {/* Consider Next/Image for perf; <img> is fine to start */}
           {photos.map((ph) => (
             <img
               key={ph.id}
