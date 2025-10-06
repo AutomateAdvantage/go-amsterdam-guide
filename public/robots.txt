@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /api
+Disallow: /_next
+Disallow: /assets
+Disallow: /private
+Sitemap: https://go-amsterdam-guide.vercel.app/sitemap.xml
+Host: go-amsterdam-guide.vercel.app
