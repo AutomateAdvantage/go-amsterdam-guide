@@ -1,90 +1,76 @@
-// src/app/amsterdam/[category]/page.tsx
+import { notFound } from "next/navigation";
+import Link from "next/link";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
-import { PlaceCard } from "@/components/PlaceCard";
+import Breadcrumbs from "@/components/Breadcrumbs";
 
-type PageProps = {
-  params: Promise<{ category: string }>;    // Next 15: params is a Promise
-  searchParams?: Promise<{ page?: string }>;
-};
+type Params = { category: string };
 
-export default async function CategoryPage({ params, searchParams }: PageProps) {
-  const { category } = await params;
-  const sp = searchParams ? await searchParams : {};
-  const page = Math.max(1, Number(sp?.page ?? 1));
-  const pageSize = 24;
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
+export default async function CategoryPage(props: { params: Promise<Params> }) {
+  // ✅ Next 15 dynamic params are async
+  const { category } = await props.params;
 
   const sb = createAdminSupabaseClient();
 
-  // 1) Resolve category
-  const { data: categoryRow } = await sb
+  // Get category object
+  const { data: cat } = await sb
     .from("categories")
-    .select("id,label,slug")
+    .select("id, label, slug")
     .eq("slug", category)
     .maybeSingle();
 
-  if (!categoryRow) {
-    return (
-      <main className="mx-auto max-w-6xl px-4 py-16">
-        <h1 className="text-3xl font-bold">Category not found</h1>
-        <p className="mt-2">We couldn’t find the category “{category}”.</p>
-      </main>
-    );
-  }
+  if (!cat) notFound();
 
-  // 2) Fetch places (join neighborhood info if present)
-  const { data: places, count } = await sb
+  // Fetch places in this category (latest updated first)
+  const { data: places } = await sb
     .from("places")
-    .select("slug,name,photo_url,rating,review_count,price_level,neighborhoods(name)", { count: "exact" })
-    .eq("category_id", categoryRow.id)
-    .order("rating", { ascending: false, nullsFirst: false })
-    .order("review_count", { ascending: false, nullsFirst: false })
-    .range(from, to);
-
-  const total = count ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    .select("slug, name, rating, review_count, price_level, neighborhoods ( name )")
+    .eq("category_id", cat.id)
+    .order("updated_at", { ascending: false })
+    .limit(200);
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-10">
-      <h1 className="text-3xl font-bold">{categoryRow.label} in Amsterdam</h1>
-      <p className="mt-2 text-neutral-600">Top picks, maps, and ratings.</p>
+      <Breadcrumbs
+        items={[
+          { label: "Amsterdam", href: "/" },
+          { label: cat.label },
+        ]}
+      />
 
-      <section className="mt-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-        {(places ?? []).map((p) => (
-          <PlaceCard
+      <h1 className="text-3xl font-bold">{cat.label} in Amsterdam</h1>
+      <p className="mt-2 text-muted-foreground">
+        Top {cat.label.toLowerCase()} — curated.
+      </p>
+
+      <section className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+        {(places ?? []).map((p) => {
+          const hoodName = Array.isArray(p.neighborhoods)
+            ? p.neighborhoods[0]?.name
+            : p.neighborhoods?.name;
+        return (
+          <Link
             key={p.slug}
-            slug={p.slug}
-            name={p.name}
-            photo_url={(p as any).photo_url}
-            rating={(p as any).rating}
-            review_count={(p as any).review_count}
-            price_level={(p as any).price_level}
-            neighborhood_name={(p as any).neighborhoods?.name ?? null}
-          />
-        ))}
+            href={`/place/${p.slug}`}
+            className="block rounded-2xl border p-4 hover:shadow"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold">{p.name}</h3>
+                <p className="text-sm text-muted-foreground">
+                  {hoodName ? `${hoodName} · ` : ""}
+                  {typeof p.rating === "number" ? `⭐ ${p.rating.toFixed(1)}` : ""}
+                  {typeof p.review_count === "number" ? ` (${p.review_count})` : ""}
+                </p>
+              </div>
+              {typeof p.price_level === "number" && p.price_level > 0 ? (
+                <span className="rounded-full bg-black/5 px-2 py-1 text-xs">
+                  {"€".repeat(Math.min(4, Math.max(1, Math.floor(p.price_level))))}
+                </span>
+              ) : null}
+            </div>
+          </Link>
+        )})}
       </section>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <nav className="mt-8 flex items-center gap-2">
-          <a
-            href={`?page=${Math.max(1, page - 1)}`}
-            className={`rounded border px-3 py-1 ${page <= 1 ? "pointer-events-none opacity-50" : "hover:bg-neutral-50"}`}
-          >
-            Prev
-          </a>
-          <span className="text-sm text-neutral-600">
-            Page {page} of {totalPages}
-          </span>
-          <a
-            href={`?page=${Math.min(totalPages, page + 1)}`}
-            className={`rounded border px-3 py-1 ${page >= totalPages ? "pointer-events-none opacity-50" : "hover:bg-neutral-50"}`}
-          >
-            Next
-          </a>
-        </nav>
-      )}
     </main>
   );
 }

@@ -1,91 +1,132 @@
 // src/app/place/[slug]/page.tsx
+import Image from "next/image";
+import { notFound } from "next/navigation";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
-type Props = { params: Promise<{ slug: string }> };
+type Params = { slug: string };
 
-export default async function PlacePage({ params }: Props) {
-  const { slug } = await params;
+// Small helpers
+function euros(level: number | null | undefined) {
+  if (!level || level < 1) return "";
+  return "€".repeat(Math.min(4, Math.max(1, Math.floor(level))));
+}
+
+export default async function PlacePage(props: { params: Promise<Params> }) {
+  // ✅ Next.js 15 dynamic params can be async:
+  const { slug } = await props.params;
+
   const sb = createAdminSupabaseClient();
 
-  const { data: place } = await sb
+  // 1) Fetch the place (join label/name from related tables)
+  const { data: place, error: placeErr } = await sb
     .from("places")
-    .select("slug,name,address,website,price_level,rating,review_count,photo_url, categories(label,slug), neighborhoods(name,slug)")
+    .select(
+      `
+      id, slug, name, address, website, rating, review_count, price_level,
+      categories ( label ),
+      neighborhoods ( name )
+    `
+    )
     .eq("slug", slug)
     .maybeSingle();
 
+  if (placeErr) {
+    console.error(placeErr);
+  }
   if (!place) {
-    return (
-      <main className="mx-auto max-w-4xl px-4 py-16">
-        <h1 className="text-3xl font-bold">Place not found</h1>
-        <p className="mt-2">We couldn’t find “{slug}”.</p>
-      </main>
-    );
+    notFound();
   }
 
-  const neighborhoodName = (place as any).neighborhoods?.name ?? null;
-  const categoryLabel = (place as any).categories?.label ?? null;
+  // Normalize possible array/object shapes from Supabase joins
+  const categoryLabel =
+    Array.isArray(place.categories)
+      ? place.categories[0]?.label
+      : place.categories?.label;
 
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "Place",
-    name: place.name,
-    address: place.address || undefined,
-    url: place.website || undefined,
-    image: place.photo_url || undefined,
-    aggregateRating:
-      place.rating
-        ? {
-            "@type": "AggregateRating",
-            ratingValue: place.rating,
-            reviewCount: place.review_count ?? 0,
-          }
-        : undefined,
-  };
+  const neighborhoodName =
+    Array.isArray(place.neighborhoods)
+      ? place.neighborhoods[0]?.name
+      : place.neighborhoods?.name;
+
+  // 2) Fetch photos for this place
+  const { data: photos, error: photoErr } = await sb
+    .from("place_photos")
+    .select("url, alt, sort_order")
+    .eq("place_id", place.id)
+    .order("sort_order", { ascending: true });
+
+  if (photoErr) {
+    console.error(photoErr);
+  }
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-10">
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+    <main className="mx-auto max-w-6xl px-4 py-10">
+      {/* Header */}
+      <header className="flex flex-col gap-2">
+        <h1 className="text-3xl font-bold">{place.name}</h1>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <div className="rounded-2xl overflow-hidden bg-neutral-100">
-          {place.photo_url ? (
-            <img src={place.photo_url} alt={place.name} className="w-full h-auto" />
-          ) : (
-            <div className="aspect-[4/3] grid place-items-center text-neutral-400">No photo</div>
-          )}
+        <div className="text-sm text-muted-foreground">
+          {/* Meta line: category • neighborhood */}
+          {categoryLabel ? <span>{categoryLabel}</span> : null}
+          {neighborhoodName ? (
+            <span>{categoryLabel ? " · " : ""}{neighborhoodName}</span>
+          ) : null}
         </div>
 
-        <div>
-          <h1 className="text-3xl font-bold">{place.name}</h1>
-          <div className="text-sm text-neutral-600 mt-1">
-            {categoryLabel ? <>{categoryLabel}</> : null}
-            {categoryLabel && neighborhoodName ? <span> · </span> : null}
-            {neighborhoodName ? <>{neighborhoodName}</> : null}
-          </div>
+        <div className="text-sm">
+          {/* Rating / reviews / price */}
+          {typeof place.rating === "number" ? (
+            <>
+              ⭐ {place.rating.toFixed(1)}{" "}
+              {typeof place.review_count === "number"
+                ? `(${place.review_count})`
+                : null}
+              {" · "}
+            </>
+          ) : null}
+          {euros(place.price_level)}
+        </div>
 
-          <div className="mt-2 text-sm">
-            {typeof place.rating === "number" ? <>⭐ {place.rating} ({place.review_count ?? 0})</> : null}
-          </div>
-
-          {place.address ? <div className="mt-3">{place.address}</div> : null}
-
-          <div className="mt-4 flex gap-2">
-            {place.website ? (
-              <a href={place.website} target="_blank" rel="noopener noreferrer" className="rounded border px-3 py-2 hover:bg-neutral-50">
-                Website
-              </a>
-            ) : null}
+        {/* Address / website */}
+        <div className="mt-2 text-sm">
+          {place.address ? <div>{place.address}</div> : null}
+          {place.website ? (
             <a
-              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name + (place.address ? " " + place.address : " Amsterdam"))}`}
+              href={place.website}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded border px-3 py-2 hover:bg-neutral-50"
+              className="text-blue-600 underline underline-offset-2"
             >
-              Open in Maps
+              Visit website
             </a>
-          </div>
+          ) : null}
         </div>
-      </div>
+      </header>
+
+      {/* Photo grid */}
+      {photos?.length ? (
+        <section className="mt-6">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+            {photos.map((p) => (
+              <div key={p.url} className="relative aspect-square w-full overflow-hidden rounded-xl">
+                <Image
+                  src={p.url}
+                  alt={p.alt || place.name}
+                  fill
+                  sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 33vw"
+                  className="object-cover"
+                  priority={false}
+                />
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {/* Spacer */}
+      <div className="h-10" />
+
+      {/* (Optional) Map linkouts / more sections can go here */}
     </main>
   );
 }
