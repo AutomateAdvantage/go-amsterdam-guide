@@ -116,3 +116,6 @@ export default async function AdminPage() {
     </main>
   );
 }
+<a href="/admin/import" className="inline-block rounded-md border px-3 py-2 hover:bg-gray-50">
+  CSV Importer
+</a>
