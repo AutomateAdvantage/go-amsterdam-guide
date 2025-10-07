@@ -1,18 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import Papa from "papaparse";
-
-type CsvRow = Record<string, string>;
-
-function normalizeHeader(h: string): string {
-  return h.toLowerCase().trim().replace(/\s+/g, "_").replace(/-+/g, "_");
-}
 
 export default function AdminImportPage() {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -52,65 +44,14 @@ export default function AdminImportPage() {
     URL.revokeObjectURL(url);
   }
 
-  async function validateCsvLocally(selected: File) {
-    setStatus("Validating CSV…");
-    return new Promise<void>((resolve, reject) => {
-      const reader = new FileReader();
-
-      reader.onerror = () => {
-        const message = "Failed to read file";
-        setStatus(message);
-        reject(new Error(message));
-      };
-
-      reader.onload = () => {
-        const text = String(reader.result ?? "");
-        const results = Papa.parse<CsvRow>(text, {
-          header: true,
-          skipEmptyLines: "greedy",
-          transformHeader: normalizeHeader,
-        }) as unknown as Papa.ParseResult<CsvRow>;
-
-        if (results.errors?.length) {
-          const first = results.errors[0];
-          const rowInfo = first.row != null ? ` at row ${first.row}` : "";
-          const message = `Parse error${rowInfo}: ${first.message ?? "unknown"}`;
-          setStatus(message);
-          reject(new Error(message));
-          return;
-        }
-
-        const headers = (results.meta.fields ?? []).map(normalizeHeader);
-        const required = ["name", "slug", "category_slug"];
-        const missing = required.filter((h) => !headers.includes(h));
-        if (missing.length) {
-          const message = `Missing required columns: ${missing.join(", ")}`;
-          setStatus(message);
-          reject(new Error(message));
-          return;
-        }
-
-        setStatus(`Parsed ${results.data.length} rows. Ready to import.`);
-        resolve();
-      };
-
-      reader.readAsText(selected);
-    });
-  }
-
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setMsg(null);
     setErr(null);
-    setStatus(null);
     if (!file) return;
 
     try {
-      await validateCsvLocally(file);
-
       setBusy(true);
-      setStatus("Uploading to server…");
-
       const fd = new FormData();
       fd.append("file", file);
 
@@ -118,17 +59,19 @@ export default function AdminImportPage() {
         method: "POST",
         body: fd,
       });
-      if (!res.ok) throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
+
+      if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
 
       const json = await res.json().catch(() => ({}));
       setMsg(
-        json?.message ??
-          `Import complete${json?.insertedOrUpdated != null ? `: ${json.insertedOrUpdated} upserted` : ""}`
+        json?.message ||
+          `Import complete${json?.inserted != null ? `: ${json.inserted} inserted` : ""}`
       );
-      setStatus(null);
+
+      // reset file control
       setFile(null);
-      const input = document.getElementById("file") as HTMLInputElement | null;
-      if (input) input.value = "";
+      const el = document.getElementById("file") as HTMLInputElement | null;
+      if (el) el.value = "";
     } catch (e: any) {
       setErr(e?.message ?? "Import failed");
     } finally {
@@ -140,7 +83,7 @@ export default function AdminImportPage() {
     <main className="mx-auto max-w-4xl px-6 py-10">
       <h1 className="text-3xl font-bold">Admin: CSV Import</h1>
       <p className="mt-2 text-sm text-muted-foreground">
-        <strong>Required:</strong> <code>name</code>, <code>slug</code>, <code>category_slug</code>.{" "}
+        <strong>Columns required:</strong> <code>name</code>, <code>slug</code>, <code>category_slug</code>.{" "}
         <strong>Optional:</strong> <code>address</code>, <code>website</code>, <code>price_level</code>,{" "}
         <code>rating</code>, <code>review_count</code>, <code>neighborhood_slug</code>.
       </p>
@@ -150,12 +93,7 @@ export default function AdminImportPage() {
           id="file"
           type="file"
           accept=".csv,text/csv"
-          onChange={(e) => {
-            setFile(e.target.files?.[0] ?? null);
-            setMsg(null);
-            setErr(null);
-            setStatus(null);
-          }}
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
         />
 
         <button type="button" onClick={downloadTemplate} className="rounded-xl border px-4 py-2">
@@ -173,7 +111,6 @@ export default function AdminImportPage() {
         </button>
       </form>
 
-      {status && <p className="mt-3 text-sm text-blue-700">{status}</p>}
       {msg && <p className="mt-4 text-green-700">{msg}</p>}
       {err && <p className="mt-4 text-red-600">{err}</p>}
     </main>
