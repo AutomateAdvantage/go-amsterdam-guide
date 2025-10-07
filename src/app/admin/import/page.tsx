@@ -3,138 +3,162 @@
 import { useState } from "react";
 import Papa from "papaparse";
 
-type CsvRow = {
-  name?: string;
-  slug?: string;
-  address?: string;
-  website?: string;
-  price_level?: string | number;
-  rating?: string | number;
-  review_count?: string | number;
-  category_slug?: string;
-  neighborhood_slug?: string;
-};
+type CsvRow = Record<string, unknown>;
+
+function normalizeHeader(h: string): string {
+  return h.toLowerCase().trim().replace(/\s+/g, "_").replace(/-+/g, "_");
+}
 
 export default function AdminImportPage() {
-  const [rows, setRows] = useState<CsvRow[]>([]);
-  const [preview, setPreview] = useState<CsvRow[]>([]);
-  const [status, setStatus] = useState<string>("");
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  function onFile(file: File) {
-    setStatus("Parsing CSV…");
-    Papa.parse<CsvRow>(file, {
-      header: true,
-      skipEmptyLines: true,
-      transformHeader: (h) => h.trim().toLowerCase(),
-      complete: (res) => {
-        const data = (res.data || []).map((r) => ({
-          ...r,
-          // normalize fields
-          slug: r.slug?.trim(),
-          category_slug: r.category_slug?.trim(),
-          neighborhood_slug: r.neighborhood_slug?.trim(),
-        }));
-        setRows(data);
-        setPreview(data.slice(0, 10));
-        setStatus(`Parsed ${data.length} rows. Ready to import.`);
-      },
-      error: (err) => setStatus(`Parse error: ${err.message}`),
-    });
-  }
-
-  async function importRows() {
-    if (!rows.length) return;
-    setStatus("Importing…");
-    const res = await fetch("/api/import/places", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rows }),
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      setStatus(`Import failed: ${res.status} ${text}`);
-      return;
-    }
-    const data = await res.json();
-    setStatus(`Imported ${data.inserted} (updated ${data.updated}). Errors: ${data.errors?.length || 0}`);
-  }
-
-  const downloadTemplate = () => {
-    const headers = [
+  const templateRows = [
+    [
       "name",
       "slug",
+      "category_slug",
       "address",
       "website",
       "price_level",
       "rating",
       "review_count",
-      "category_slug",
       "neighborhood_slug",
-    ];
-    const blob = new Blob([headers.join(",") + "\n"], { type: "text/csv;charset=utf-8" });
+    ],
+    [
+      "Cafe de Pijp",
+      "cafe-de-pijp",
+      "cafes",
+      "Ferdinand Bolstraat 1, Amsterdam",
+      "https://cafedepijp.example",
+      "2",
+      "4.4",
+      "123",
+      "de-pijp",
+    ],
+  ];
+
+  function downloadTemplate() {
+    const csv = templateRows.map((r) => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "places_template.csv";
+    a.download = "places-template.csv";
     a.click();
     URL.revokeObjectURL(url);
-  };
+  }
+
+  async function validateCsvLocally(selected: File) {
+    setStatus("Validating CSV…");
+    return new Promise<void>((resolve, reject) => {
+      Papa.parse<CsvRow>(selected, {
+        header: true,
+        skipEmptyLines: "greedy",
+        transformHeader: normalizeHeader,
+        complete: (results) => {
+          // 1) parser-level errors
+          if (results.errors && results.errors.length > 0) {
+            const first = results.errors[0];
+            const rowInfo = first.row != null ? ` at row ${first.row}` : "";
+            const msg = `Parse error${rowInfo}: ${first.message ?? "unknown"}`;
+            setStatus(msg);
+            reject(new Error(msg));
+            return;
+          }
+
+          // 2) required columns
+          const headers = (results.meta.fields ?? []).map(normalizeHeader);
+          const required = ["name", "slug", "category_slug"];
+          const missing = required.filter((h) => !headers.includes(h));
+          if (missing.length) {
+            const msg = `Missing required columns: ${missing.join(", ")}`;
+            setStatus(msg);
+            reject(new Error(msg));
+            return;
+          }
+
+          setStatus(`Parsed ${results.data.length} rows. Ready to import.`);
+          resolve();
+        },
+      });
+    });
+  }
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setMsg(null);
+    setErr(null);
+    setStatus(null);
+    if (!file) return;
+
+    try {
+      // quick local validation before server upload
+      await validateCsvLocally(file);
+
+      setBusy(true);
+      setStatus("Uploading to server…");
+
+      const fd = new FormData();
+      fd.append("file", file);
+
+      const res = await fetch("/api/import/places", {
+        method: "POST",
+        body: fd,
+      });
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(txt || `HTTP ${res.status}`);
+      }
+
+      const json = await res.json().catch(() => ({}));
+      setMsg(
+        json?.message ??
+          `Import complete${
+            json?.insertedOrUpdated != null ? `: ${json.insertedOrUpdated} upserted` : ""
+          }`
+      );
+      setStatus(null);
+      setFile(null);
+      const input = document.getElementById("file") as HTMLInputElement | null;
+      if (input) input.value = "";
+    } catch (e: any) {
+      setErr(e?.message ?? "Import failed");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
-    <main className="mx-auto max-w-5xl p-6">
+    <main className="mx-auto max-w-4xl px-6 py-10">
       <h1 className="text-3xl font-bold">Admin: CSV Import</h1>
-      <p className="text-sm text-muted-foreground mt-2">
-        Columns required: <code>name, slug, category_slug</code>. Optional: <code>address, website, price_level, rating, review_count, neighborhood_slug</code>.
+      <p className="mt-2 text-sm text-muted-foreground">
+        <strong>Required columns:</strong> <code>name</code>, <code>slug</code>,{" "}
+        <code>category_slug</code>. <strong>Optional:</strong>{" "}
+        <code>address</code>, <code>website</code>, <code>price_level</code>,{" "}
+        <code>rating</code>, <code>review_count</code>, <code>neighborhood_slug</code>.
       </p>
 
-      <div className="mt-6 flex items-center gap-3">
+      <form onSubmit={onSubmit} className="mt-6 flex flex-wrap items-center gap-3">
         <input
+          id="file"
           type="file"
           accept=".csv,text/csv"
           onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) onFile(f);
+            setFile(e.target.files?.[0] ?? null);
+            setMsg(null);
+            setErr(null);
+            setStatus(null);
           }}
         />
-        <button className="rounded-md border px-3 py-2" onClick={downloadTemplate}>
-          Download CSV template
-        </button>
+
         <button
-          className="rounded-md bg-black text-white px-3 py-2 disabled:opacity-50"
-          disabled={!rows.length}
-          onClick={importRows}
+          type="button"
+          onClick={downloadTemplate}
+          className="rounded-xl border px-4 py-2"
         >
-          Import {rows.length ? `(${rows.length})` : ""}
-        </button>
-      </div>
-
-      {status && <p className="mt-4">{status}</p>}
-
-      {preview.length > 0 && (
-        <div className="mt-6">
-          <h2 className="text-xl font-semibold mb-2">Preview (first 10 rows)</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border">
-              <thead className="bg-gray-50">
-                <tr>
-                  {Object.keys(preview[0]).map((k) => (
-                    <th key={k} className="p-2 border-b text-left">{k}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {preview.map((r, i) => (
-                  <tr key={i} className="odd:bg-white even:bg-gray-50">
-                    {Object.keys(preview[0]).map((k) => (
-                      <td key={k} className="p-2 border-b">{(r as any)[k] ?? ""}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-    </main>
-  );
-}
+          Download CSV template
