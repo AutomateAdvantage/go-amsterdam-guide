@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Papa from "papaparse";
 
-type CsvRow = Record<string, unknown>;
+type CsvRow = Record<string, string>;
 
 function normalizeHeader(h: string): string {
   return h.toLowerCase().trim().replace(/\s+/g, "_").replace(/-+/g, "_");
@@ -55,34 +55,46 @@ export default function AdminImportPage() {
   async function validateCsvLocally(selected: File) {
     setStatus("Validating CSV…");
     return new Promise<void>((resolve, reject) => {
-      Papa.parse<CsvRow>(selected, {
-        header: true,
-        skipEmptyLines: "greedy",
-        transformHeader: normalizeHeader,
-        complete: (results) => {
-          if (results.errors?.length) {
-            const first = results.errors[0];
-            const rowInfo = first.row != null ? ` at row ${first.row}` : "";
-            const message = `Parse error${rowInfo}: ${first.message ?? "unknown"}`;
-            setStatus(message);
-            reject(new Error(message));
-            return;
-          }
+      const reader = new FileReader();
 
-          const headers = (results.meta.fields ?? []).map(normalizeHeader);
-          const required = ["name", "slug", "category_slug"];
-          const missing = required.filter((h) => !headers.includes(h));
-          if (missing.length) {
-            const message = `Missing required columns: ${missing.join(", ")}`;
-            setStatus(message);
-            reject(new Error(message));
-            return;
-          }
+      reader.onerror = () => {
+        const message = "Failed to read file";
+        setStatus(message);
+        reject(new Error(message));
+      };
 
-          setStatus(`Parsed ${results.data.length} rows. Ready to import.`);
-          resolve();
-        },
-      });
+      reader.onload = () => {
+        const text = String(reader.result ?? "");
+        const results = Papa.parse<CsvRow>(text, {
+          header: true,
+          skipEmptyLines: "greedy",
+          transformHeader: normalizeHeader,
+        }) as unknown as Papa.ParseResult<CsvRow>;
+
+        if (results.errors?.length) {
+          const first = results.errors[0];
+          const rowInfo = first.row != null ? ` at row ${first.row}` : "";
+          const message = `Parse error${rowInfo}: ${first.message ?? "unknown"}`;
+          setStatus(message);
+          reject(new Error(message));
+          return;
+        }
+
+        const headers = (results.meta.fields ?? []).map(normalizeHeader);
+        const required = ["name", "slug", "category_slug"];
+        const missing = required.filter((h) => !headers.includes(h));
+        if (missing.length) {
+          const message = `Missing required columns: ${missing.join(", ")}`;
+          setStatus(message);
+          reject(new Error(message));
+          return;
+        }
+
+        setStatus(`Parsed ${results.data.length} rows. Ready to import.`);
+        resolve();
+      };
+
+      reader.readAsText(selected);
     });
   }
 

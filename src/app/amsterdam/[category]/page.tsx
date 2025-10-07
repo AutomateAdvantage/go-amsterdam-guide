@@ -5,6 +5,16 @@ import Breadcrumbs from "@/components/Breadcrumbs";
 
 type Params = { category: string };
 
+type Neighborhood = { name?: string };
+type PlaceRow = {
+  slug: string;
+  name: string;
+  rating?: number | null;
+  review_count?: number | null;
+  price_level?: number | null;
+  neighborhoods?: Neighborhood | Neighborhood[] | null;
+};
+
 export default async function CategoryPage(props: { params: Promise<Params> }) {
   // ✅ Next 15 dynamic params are async
   const { category } = await props.params;
@@ -43,7 +53,7 @@ export default async function CategoryPage(props: { params: Promise<Params> }) {
       </p>
 
       <section className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
-        {(places ?? []).map((p) => {
+        {((places as PlaceRow[] | null) ?? []).map((p: PlaceRow) => {
           const hoodName = Array.isArray(p.neighborhoods)
             ? p.neighborhoods[0]?.name
             : p.neighborhoods?.name;
