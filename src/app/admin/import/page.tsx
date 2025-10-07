@@ -60,24 +60,24 @@ export default function AdminImportPage() {
         skipEmptyLines: "greedy",
         transformHeader: normalizeHeader,
         complete: (results) => {
-          // 1) parser-level errors
+          // 1) Parser-level errors collected by Papa
           if (results.errors && results.errors.length > 0) {
             const first = results.errors[0];
             const rowInfo = first.row != null ? ` at row ${first.row}` : "";
-            const msg = `Parse error${rowInfo}: ${first.message ?? "unknown"}`;
-            setStatus(msg);
-            reject(new Error(msg));
+            const message = `Parse error${rowInfo}: ${first.message ?? "unknown"}`;
+            setStatus(message);
+            reject(new Error(message));
             return;
           }
 
-          // 2) required columns
+          // 2) Required headers
           const headers = (results.meta.fields ?? []).map(normalizeHeader);
           const required = ["name", "slug", "category_slug"];
           const missing = required.filter((h) => !headers.includes(h));
           if (missing.length) {
-            const msg = `Missing required columns: ${missing.join(", ")}`;
-            setStatus(msg);
-            reject(new Error(msg));
+            const message = `Missing required columns: ${missing.join(", ")}`;
+            setStatus(message);
+            reject(new Error(message));
             return;
           }
 
@@ -96,7 +96,7 @@ export default function AdminImportPage() {
     if (!file) return;
 
     try {
-      // quick local validation before server upload
+      // Local validation before upload
       await validateCsvLocally(file);
 
       setBusy(true);
@@ -162,3 +162,22 @@ export default function AdminImportPage() {
           className="rounded-xl border px-4 py-2"
         >
           Download CSV template
+        </button>
+
+        <button
+          type="submit"
+          disabled={!file || busy}
+          className={`rounded-xl px-4 py-2 text-white ${
+            !file || busy ? "bg-gray-400" : "bg-black hover:opacity-90"
+          }`}
+        >
+          {busy ? "Importing…" : "Import"}
+        </button>
+      </form>
+
+      {status && <p className="mt-3 text-sm text-blue-700">{status}</p>}
+      {msg && <p className="mt-4 text-green-700">{msg}</p>}
+      {err && <p className="mt-4 text-red-600">{err}</p>}
+    </main>
+  );
+}
