@@ -52,7 +52,6 @@ export default function AdminImportPage() {
     URL.revokeObjectURL(url);
   }
 
-  // Validate CSV locally with Papa — NO `error:` option, handle in `complete`
   async function validateCsvLocally(selected: File) {
     setStatus("Validating CSV…");
     return new Promise<void>((resolve, reject) => {
@@ -61,8 +60,7 @@ export default function AdminImportPage() {
         skipEmptyLines: "greedy",
         transformHeader: normalizeHeader,
         complete: (results) => {
-          // parser-level errors are collected in results.errors
-          if (results.errors && results.errors.length > 0) {
+          if (results.errors?.length) {
             const first = results.errors[0];
             const rowInfo = first.row != null ? ` at row ${first.row}` : "";
             const message = `Parse error${rowInfo}: ${first.message ?? "unknown"}`;
@@ -108,18 +106,12 @@ export default function AdminImportPage() {
         method: "POST",
         body: fd,
       });
-
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(txt || `HTTP ${res.status}`);
-      }
+      if (!res.ok) throw new Error((await res.text().catch(() => "")) || `HTTP ${res.status}`);
 
       const json = await res.json().catch(() => ({}));
       setMsg(
         json?.message ??
-          `Import complete${
-            json?.insertedOrUpdated != null ? `: ${json.insertedOrUpdated} upserted` : ""
-          }`
+          `Import complete${json?.insertedOrUpdated != null ? `: ${json.insertedOrUpdated} upserted` : ""}`
       );
       setStatus(null);
       setFile(null);
