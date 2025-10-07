@@ -52,6 +52,7 @@ export default function AdminImportPage() {
     URL.revokeObjectURL(url);
   }
 
+  // Validate CSV locally with Papa — NO `error:` option, handle in `complete`
   async function validateCsvLocally(selected: File) {
     setStatus("Validating CSV…");
     return new Promise<void>((resolve, reject) => {
@@ -60,7 +61,7 @@ export default function AdminImportPage() {
         skipEmptyLines: "greedy",
         transformHeader: normalizeHeader,
         complete: (results) => {
-          // 1) Parser-level errors collected by Papa
+          // parser-level errors are collected in results.errors
           if (results.errors && results.errors.length > 0) {
             const first = results.errors[0];
             const rowInfo = first.row != null ? ` at row ${first.row}` : "";
@@ -70,7 +71,6 @@ export default function AdminImportPage() {
             return;
           }
 
-          // 2) Required headers
           const headers = (results.meta.fields ?? []).map(normalizeHeader);
           const required = ["name", "slug", "category_slug"];
           const missing = required.filter((h) => !headers.includes(h));
@@ -96,7 +96,6 @@ export default function AdminImportPage() {
     if (!file) return;
 
     try {
-      // Local validation before upload
       await validateCsvLocally(file);
 
       setBusy(true);
@@ -137,9 +136,8 @@ export default function AdminImportPage() {
     <main className="mx-auto max-w-4xl px-6 py-10">
       <h1 className="text-3xl font-bold">Admin: CSV Import</h1>
       <p className="mt-2 text-sm text-muted-foreground">
-        <strong>Required columns:</strong> <code>name</code>, <code>slug</code>,{" "}
-        <code>category_slug</code>. <strong>Optional:</strong>{" "}
-        <code>address</code>, <code>website</code>, <code>price_level</code>,{" "}
+        <strong>Required:</strong> <code>name</code>, <code>slug</code>, <code>category_slug</code>.{" "}
+        <strong>Optional:</strong> <code>address</code>, <code>website</code>, <code>price_level</code>,{" "}
         <code>rating</code>, <code>review_count</code>, <code>neighborhood_slug</code>.
       </p>
 
@@ -156,11 +154,7 @@ export default function AdminImportPage() {
           }}
         />
 
-        <button
-          type="button"
-          onClick={downloadTemplate}
-          className="rounded-xl border px-4 py-2"
-        >
+        <button type="button" onClick={downloadTemplate} className="rounded-xl border px-4 py-2">
           Download CSV template
         </button>
 
