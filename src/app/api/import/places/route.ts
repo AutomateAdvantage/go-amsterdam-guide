@@ -78,15 +78,23 @@ export async function POST(req: Request) {
     const csvText = await file.text();
 
     // Parse CSV
-    let rows: RawRow[] = [];
-    Papa.parse<RawRow>(csvText, {
-      header: true,
-      skipEmptyLines: "greedy",
-      transformHeader: normalizeHeader,
-      complete: (res) => {
-        rows = res.data;
-      },
+    const parseResult = await new Promise<Papa.ParseResult<RawRow>>((resolve) => {
+      Papa.parse<RawRow>(csvText, {
+        header: true,
+        skipEmptyLines: "greedy",
+        transformHeader: normalizeHeader,
+        complete: resolve,
+      });
     });
+
+    if (parseResult.errors && parseResult.errors.length > 0) {
+      return NextResponse.json(
+        { message: "CSV parse error", details: parseResult.errors[0].message },
+        { status: 400 }
+      );
+    }
+
+    const rows = parseResult.data;
 
     if (!rows.length) {
       return NextResponse.json({ message: "CSV contained no rows" }, { status: 400 });
